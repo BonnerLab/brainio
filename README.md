@@ -47,8 +47,8 @@ These are described below.  We recommend installing in a managed Python environm
 
 1. Install BrainIO using `pip` in an existing environment
     1. Activate your environment.
-    1. `pip install git+https://github.com/brain-score/brainio.git`
-1. Install a project that provides a BrainIO Catalog
+    1. `pip install git+https://github.com/BonnerLab/brainio.git`
+2. Install a project that provides a BrainIO Catalog
     * If you intend to use a BrainIO catalog to access data or stimuli that have already been packaged, you will need to install the project that provides the catalog that you intend to use.  Here we illustrate with [a project called `brainio-dicarlo`](https://github.com/dicarlolab/brainio-dicarlo) provided by the DiCarlo Lab:  
     1. Activate your environment
     1. `pip install git+https://github.com/dicarlolab/brainio-dicarlo.git`

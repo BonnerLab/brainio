@@ -25,7 +25,7 @@ setup(
     long_description=readme,
     author="Jon Prescott-Roy, Martin Schrimpf",
     author_email='jjpr@mit.edu, mschrimpf@mit.edu',
-    url='https://github.com/brain-score/brainio',
+    url='https://github.com/BonnerLab/brainio',
     packages=find_packages(exclude=['tests', 'brainio-test']),
     include_package_data=True,
     install_requires=requirements,
