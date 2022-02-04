@@ -13,6 +13,7 @@ from PIL import Image
 import brainio.assemblies
 from brainio import lookup, list_stimulus_sets
 from brainio.lookup import TYPE_ASSEMBLY, TYPE_STIMULUS_SET, sha1_hash
+from brainio.xarray_utils import extend_netcdf
 
 _logger = logging.getLogger(__name__)
 
@@ -172,10 +173,14 @@ def package_stimulus_set(catalog_name, proto_stimulus_set, stimulus_set_identifi
     _logger.debug(f"stimulus set {stimulus_set_identifier} packaged")
 
 
-def write_netcdf(assembly, target_netcdf_file):
-    _logger.debug(f"Writing assembly to {target_netcdf_file}")
+def write_netcdf(assembly, target_netcdf_file, extending_dim=None):
     assembly = assembly.reset_index(list(assembly.indexes))
-    assembly.to_netcdf(target_netcdf_file)
+    if not os.path.exists(target_netcdf_file):
+        _logger.debug(f"Writing assembly to {target_netcdf_file}")
+    if extending_dim is None:
+        assembly.to_netcdf(target_netcdf_file)
+    else:
+        extend_netcdf(assembly, target_netcdf_file, extending_dim=extending_dim)
     sha1 = sha1_hash(target_netcdf_file)
     return sha1
 
@@ -226,6 +231,53 @@ def package_data_assembly(catalog_name, proto_data_assembly, assembly_identifier
 
     # execute
     netcdf_kf_sha1 = write_netcdf(proto_data_assembly, target_netcdf_path)
+    upload_to_s3(target_netcdf_path, bucket_name, s3_key)
+    lookup.append(
+        catalog_name=catalog_name,
+        object_identifier=assembly_identifier, stimulus_set_identifier=stimulus_set_identifier,
+        lookup_type=TYPE_ASSEMBLY,
+        bucket_name=bucket_name, sha1=netcdf_kf_sha1,
+        s3_key=s3_key, cls=assembly_class
+    )
+    _logger.debug(f"assembly {assembly_identifier} packaged")
+
+
+# Two functions below to be used when building up an assembly in chunks that is too large to fit in memory.
+# There's some code repetition within the two functions and with the package_data_assembly function above,
+# but this is the simplest way to do it and hopefully this code shouldn't change too much.
+
+def package_data_assembly_extend(proto_data_assembly, extending_dim, assembly_identifier,
+                                 assembly_class="NeuronRecordingAssembly"):
+    # verify
+    verify_assembly(proto_data_assembly, assembly_class=assembly_class)
+    assert hasattr(brainio.assemblies, assembly_class)
+
+    # identifiers
+    assembly_store_identifier = "assy_" + assembly_identifier.replace(".", "_")
+    netcdf_file_name = assembly_store_identifier + ".nc"
+    target_netcdf_path = Path(__file__).parent / netcdf_file_name
+
+    # execute
+    _ = write_netcdf(proto_data_assembly, target_netcdf_path, extending_dim=extending_dim)
+
+
+def package_data_assembly_commit(catalog_name, assembly_identifier, stimulus_set_identifier,
+                                 assembly_class="NeuronRecordingAssembly", bucket_name="brainio-contrib"):
+    _logger.debug(f"Packaging {assembly_identifier}")
+
+    # verify
+    assert hasattr(brainio.assemblies, assembly_class)
+    assert stimulus_set_identifier in list_stimulus_sets(), \
+        f"StimulusSet {stimulus_set_identifier} not found in packaged stimulus sets"
+
+    # identifiers
+    assembly_store_identifier = "assy_" + assembly_identifier.replace(".", "_")
+    netcdf_file_name = assembly_store_identifier + ".nc"
+    target_netcdf_path = Path(__file__).parent / netcdf_file_name
+    s3_key = netcdf_file_name
+
+    # execute
+    netcdf_kf_sha1 = sha1_hash(target_netcdf_path)
     upload_to_s3(target_netcdf_path, bucket_name, s3_key)
     lookup.append(
         catalog_name=catalog_name,
