@@ -1,9 +1,13 @@
 from collections import OrderedDict, defaultdict
+from typing import Hashable, Union
 
+import os
 import itertools
 import numpy as np
 import xarray as xr
 from xarray import DataArray, IndexVariable
+
+from brainio.xarray_utils import extend_netcdf
 
 
 def is_fastpath(*args, **kwargs):
@@ -41,6 +45,13 @@ class DataAssembly(DataArray):
             temp = DataArray(*args, **kwargs)
             temp = gather_indexes(temp)
             super(DataAssembly, self).__init__(temp)
+
+    def to_netcdf(self, path: Union[str, os.PathLike], extending_dim: Hashable = None) -> None:
+        """
+        overloads xarray.DataArray.to_netcdf()
+        allows for incremental writes to an existing dataarray on disk along the unlimited dimension `extending_dim`
+        """
+        extend_netcdf(self, path=path, extending_dim=extending_dim)
 
     def multi_groupby(self, group_coord_names, *args, **kwargs):
         if len(group_coord_names) < 2:

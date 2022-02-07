@@ -177,10 +177,7 @@ def write_netcdf(assembly, target_netcdf_file, extending_dim=None):
     assembly = assembly.reset_index(list(assembly.indexes))
     if not os.path.exists(target_netcdf_file):
         _logger.debug(f"Writing assembly to {target_netcdf_file}")
-    if extending_dim is None:
-        assembly.to_netcdf(target_netcdf_file)
-    else:
-        extend_netcdf(assembly, target_netcdf_file, extending_dim=extending_dim)
+    assembly.to_netcdf(target_netcdf_file, extending_dim)
     sha1 = sha1_hash(target_netcdf_file)
     return sha1
 
