@@ -1,3 +1,4 @@
+from email.mime import image
 from typing import List
 import os
 from pathlib import Path
@@ -17,7 +18,8 @@ from brainio.stimuli import StimulusSet
 from brainio.assemblies import NeuroidAssembly
 from brainio.packaging import package_stimulus_set, package_data_assembly_extend, package_data_assembly_commit
 
-DATASET_IDENTIFIER = 'allen2021.natural-scenes'
+NEUROID_ASSEMBLY_IDENTIFIER = 'allen2021.natural-scenes'
+STIMULUS_SET_IDENTIFIER = 'allen2021.natural-scenes'
 N_SUBJECTS = 8
 N_MAX_SESSIONS = 40
 N_TRIALS_PER_SESSION = 750
@@ -37,28 +39,31 @@ def extract_hdf5_images(root_path: Path):
     """
     converts HDF5-format NSD stimuli into BrainScore-compatible PNG files
     """
+    if (root_path / 'images').exists():
+        raise RuntimeError(f'directory f{root_path}/images already exists; delete it to continue')
     image_paths = [root_path / 'images' / f'{i_stimulus}.png' for i_stimulus in range(N_STIMULI)]
     stimuli = h5py.File(root_path / 'nsddata_stimuli' / 'stimuli' / 'nsd' / 'nsd_stimuli.hdf5', 'r')['imgBrick']
     for i_stimulus in range(N_STIMULI):
         image = Image.fromarray(stimuli[i_stimulus, :, :, :])
-        image.save(image_paths[i_stimulus] / f'{i_stimulus}.png')
+        image.save(image_paths[i_stimulus])
     return image_paths
 
 
-def extract_metadata(root_path: Path):
+def load_metadata(root_path: Path):
     metadata = pd.read_csv(root_path / 'nsddata' / 'experiments' / 'nsd' / 'nsd_stim_info_merged.csv', sep=',')
     metadata.rename(columns={'Unnamed: 0': 'image_id'}, inplace=True)
-    return metadata
 
 
-def package_stimuli(metadata: pd.DataFrame, image_paths: List[Path]):
+def package_stimuli(root_path: Path):
+    image_paths = extract_hdf5_images(root_path)
+    metadata = load_metadata(root_path)
     stimulus_set = StimulusSet(metadata)
-    stimulus_set.image_paths = image_paths
+    stimulus_set.get_image = lambda image_id: image_paths[int(image_id)]
 
     package_stimulus_set(
         catalog_name=CATALOG_NAME,
         proto_stimulus_set=stimulus_set,
-        stimulus_set_identifier='natural-scenes',
+        stimulus_set_identifier=STIMULUS_SET_IDENTIFIER,
         bucket_name=BUCKET_NAME,
     )
 
@@ -67,7 +72,8 @@ def format_id(idx: int) -> str:
     return f'{idx + 1:02}'  # subjects and sessions are 1-indexed
 
 
-def format_metadata(metadata):
+def extract_trial_info(root_path: Path):
+    metadata = load_metadata(root_path)
     metadata = np.array(metadata.iloc[:, 17:])
     indices = np.nonzero(metadata)
     trials = metadata[indices[0], indices[1]] - 1  # convert from 1-indexing to 0-indexing
@@ -77,7 +83,7 @@ def format_metadata(metadata):
     session_ids = trials // N_TRIALS_PER_SESSION
     intra_session_trial_ids = trials % N_TRIALS_PER_SESSION
 
-    metadata = xr.DataArray(
+    trial_info = xr.DataArray(
         np.full((N_SUBJECTS, N_MAX_SESSIONS, N_TRIALS_PER_SESSION), np.nan, dtype=np.int64),
         dims=('subject', 'session', 'trial'),
         coords={
@@ -86,8 +92,8 @@ def format_metadata(metadata):
             'trial': np.arange(N_TRIALS_PER_SESSION),
         },
     )
-    metadata.values[subject_ids, session_ids, intra_session_trial_ids] = image_ids
-    return metadata
+    trial_info.values[subject_ids, session_ids, intra_session_trial_ids] = image_ids
+    return trial_info
 
 
 def format_roi_data(root_path: Path):
@@ -120,7 +126,7 @@ def load_ncsnr(i_subject: int):
     return ncsnr
 
 
-def load_betas(root_path: Path, i_subject: int, i_session: int):
+def load_betas(root_path: Path, i_subject: int, i_session: int, z_score=True):
     session_id = format_id(i_session)
     subject_id = format_id(i_subject)
     session_path = root_path / 'nsddata_betas' / 'ppdata' / ('subj' + subject_id) \
@@ -128,11 +134,12 @@ def load_betas(root_path: Path, i_subject: int, i_session: int):
     betas = h5py.File(session_path, 'r')['betas']
     betas = np.array(betas, dtype=np.single) / 300  # converting to % signal change
 
+    if z_score:
     # z-scoring betas across all brain_voxels
-    mean = np.nanmean(betas, axis=(1, 2, 3))
-    std = np.nanstd(betas, axis=(1, 2, 3))
-    betas = np.transpose((np.transpose(betas, axes=(1, 2, 3, 0)) - mean) / std, axes=(3, 0, 1, 2))
-
+    # TODO check if this was what was recommended in the manual
+        mean = np.nanmean(betas, axis=(1, 2, 3))
+        std = np.nanstd(betas, axis=(1, 2, 3))
+        betas = np.transpose((np.transpose(betas, axes=(1, 2, 3, 0)) - mean) / std, axes=(3, 0, 1, 2))
     return betas
 
 
@@ -160,9 +167,9 @@ def compute_nc(assembly: NeuroidAssembly):
     return ncsnr_squared / (ncsnr_squared + fraction)
 
 
-def package_assemblies(root_path: Path):
+def package_assembly(root_path: Path):
     roi_data = format_roi_data(root_path)
-    trial_info = format_metadata(root_path)
+    trial_info = extract_trial_info(root_path)
 
     for i_subject in tqdm(range(N_SUBJECTS), desc='subject'):
         subject_id = format_id(i_subject)
@@ -222,27 +229,25 @@ def package_assemblies(root_path: Path):
 
         nc = compute_nc(assembly)
         assembly = assembly.assign_coords({'nc': ('neuroid', nc)})
-        assembly = assembly.reset_index(list(assembly.indexes))
+        assembly = assembly.reset_index(list(assembly.indexes))  # TODO check if this is necessary or if package_* take care of it
 
         package_data_assembly_extend(
             assembly,
             extending_dim='neuroid',
-            assembly_identifier=DATASET_IDENTIFIER,
+            assembly_identifier=NEUROID_ASSEMBLY_IDENTIFIER,
             assembly_class='NeuronRecordingAssembly',
         )
 
     package_data_assembly_commit(
         catalog_name=CATALOG_NAME,
-        assembly_identifier=DATASET_IDENTIFIER,
-        stimulus_set_identifier=DATASET_IDENTIFIER,
+        assembly_identifier=NEUROID_ASSEMBLY_IDENTIFIER,
+        stimulus_set_identifier=STIMULUS_SET_IDENTIFIER,
         assembly_class='NeuronRecordingAssembly', 
-        bucket_name=BUCKET_NAME
+        bucket_name=BUCKET_NAME,
     )
 
 
 if __name__ == '__main__':
-    root_path = Path(os.getenv('DATASETS')) / 'natural-scenes'
-    image_paths = extract_hdf5_images(root_path)
-    metadata = extract_metadata(root_path)
-    package_stimuli(metadata, image_paths)
-    package_assemblies(root_path)
+    root_path = Path(os.getenv('SHARED_DATASETS')) / 'natural-scenes'
+    package_stimuli(root_path)
+    package_assembly(root_path)

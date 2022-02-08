@@ -1,5 +1,5 @@
 #!/bin/bash
-aws s3 sync s3://natural-scenes-dataset/ /data/shared/datasets/natural-scenes \
+aws s3 sync s3://natural-scenes-dataset/ "$SHARED_DATASETS/natural-scenes" \
 --exclude "*" \
 --include "*ppdata*func1pt8mm*streams.nii.gz" \
 --include "*ppdata*func1pt8mm*prf-visualrois.nii.gz" \
