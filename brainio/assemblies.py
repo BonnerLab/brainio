@@ -52,6 +52,7 @@ class DataAssembly(DataArray):
         allows for incremental writes to an existing dataarray on disk along the unlimited dimension `extending_dim`
         """
         da = self.reset_index(list(self.indexes))
+
         # If the file doesn't already exist, create it
         if extending_dim is None:
             DataArray.to_netcdf(da, path)
