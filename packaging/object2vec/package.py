@@ -1,5 +1,4 @@
 import argparse
-import os
 from pathlib import Path
 
 import numpy as np
@@ -21,12 +20,12 @@ def package_assembly(root_path: Path, catalog_name: str, bucket_name: str, stimu
     subj_assemblies = []
     for i_subject in range(N_SUBJECTS):
         subject_data_path = root_path / 'fmri' / 'subj{:03}'.format(i_subject + 1)
-        roistack = loadmat(subject_data_path / 'roistack.mat')['roistack']
+        roistack = loadmat(str(subject_data_path / 'roistack.mat'))['roistack']
         roi_names = [d[0] for d in roistack['rois'][0, 0][:, 0]]
         conditions = [d[0] for d in roistack['conds'][0, 0][:, 0]]
 
         roi_indices = roistack['indices'][0, 0][0] - 1  # 1-indexed
-        cv_groups = loadmat(subject_data_path / 'sets.mat')['sets']
+        cv_groups = loadmat(str(subject_data_path / 'sets.mat'))['sets']
         cv_groups = [[condition[0] for condition in cv_group[:, 0]] for cv_group in cv_groups[0, :]]
 
         betas = roistack['betas'][0, 0]
@@ -91,6 +90,5 @@ if __name__ == '__main__':
                         help='brainio catalog')
     args = parser.parse_args()
 
-    root_path = Path(os.getenv('SHARED_DATASETS')) / 'object2vec'
-    stimulus_set = package_stimuli(root_path, catalog_name=args.catalog_name, bucket_name=args.bucket_name)
-    package_assembly(root_path, catalog_name=args.catalog_name, bucket_name=args.bucket_name, stimulus_set)
+    stimulus_set = package_stimuli(root_path=args.data_dir, catalog_name=args.catalog_name, bucket_name=args.bucket_name)
+    package_assembly(root_path=args.data_dir, catalog_name=args.catalog_name, bucket_name=args.bucket_name, stimulus_set=stimulus_set)
