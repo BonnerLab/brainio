@@ -1,5 +1,5 @@
 from collections import OrderedDict, defaultdict
-from typing import Hashable, Union
+from typing import Hashable, Union, Iterable
 
 import os
 import itertools
@@ -46,18 +46,28 @@ class DataAssembly(DataArray):
             temp = gather_indexes(temp)
             super(DataAssembly, self).__init__(temp)
 
-    def to_netcdf(self, path: Union[str, os.PathLike], extending_dim: Hashable = None) -> None:
+    def to_netcdf(self, path: Union[str, os.PathLike], extending_dim: Hashable = None,
+                  unlimited_dims: Iterable[Hashable] = None) -> None:
         """
         overloads xarray.DataArray.to_netcdf()
         allows for incremental writes to an existing dataarray on disk along the unlimited dimension `extending_dim`
         """
+
+        # Handle any dimension with a MultiIndex, which cannot be saved
         da = self.reset_index(list(self.indexes))
+
+        # Combine the ultimited dimensions with the extending dimension
+        if unlimited_dims is None:
+            unlimited_dims = []
+        unlimited_dims = set(unlimited_dims)
+        unlimited_dims.add(extending_dim)
+        unlimited_dims = list(unlimited_dims)
 
         # If the file doesn't already exist, create it
         if extending_dim is None:
             DataArray.to_netcdf(da, path)
         elif not os.path.exists(path):
-            DataArray.to_netcdf(da, path, unlimited_dims=[extending_dim])
+            DataArray.to_netcdf(da, path, unlimited_dims=unlimited_dims)
         else:
             extend_netcdf(da, path=path, extending_dim=extending_dim)
 
