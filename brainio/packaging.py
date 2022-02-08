@@ -174,7 +174,6 @@ def package_stimulus_set(catalog_name, proto_stimulus_set, stimulus_set_identifi
 
 
 def write_netcdf(assembly, target_netcdf_file, extending_dim=None):
-    assembly = assembly.reset_index(list(assembly.indexes))
     if not os.path.exists(target_netcdf_file):
         _logger.debug(f"Writing assembly to {target_netcdf_file}")
     assembly.to_netcdf(target_netcdf_file, extending_dim)
