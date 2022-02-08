@@ -8,14 +8,9 @@ from xarray.backends.api import DATAARRAY_NAME, DATAARRAY_VARIABLE
 
 
 def extend_netcdf(da: DataArray, path: Union[str, os.PathLike], extending_dim: Hashable) -> None:
+    assert os.path.exists(path)
+
     da = _wrap_as_dataset(da)
-
-    # If the file doesn't already exist, create it
-    if not os.path.exists(path):
-        da.to_netcdf(path, unlimited_dims=[extending_dim])
-        return
-
-    # Otherwise, extend the existing file
     with netCDF4.Dataset(path, mode='a') as nc:
         nc_shape = nc.dimensions[extending_dim].size
         added_size = len(da[extending_dim])

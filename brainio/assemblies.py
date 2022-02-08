@@ -51,7 +51,13 @@ class DataAssembly(DataArray):
         overloads xarray.DataArray.to_netcdf()
         allows for incremental writes to an existing dataarray on disk along the unlimited dimension `extending_dim`
         """
-        extend_netcdf(self, path=path, extending_dim=extending_dim)
+        # If the file doesn't already exist, create it
+        if extending_dim is None:
+            DataArray.to_netcdf(self, path)
+        elif not os.path.exists(path):
+            DataArray.to_netcdf(self, path, unlimited_dims=[extending_dim])
+        else:
+            extend_netcdf(self, path=path, extending_dim=extending_dim)
 
     def multi_groupby(self, group_coord_names, *args, **kwargs):
         if len(group_coord_names) < 2:

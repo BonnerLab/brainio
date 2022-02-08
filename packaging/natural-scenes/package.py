@@ -1,3 +1,4 @@
+import argparse
 import os
 from pathlib import Path
 import itertools
@@ -10,13 +11,12 @@ from PIL import Image
 import nibabel as nib
 from tqdm import tqdm
 
-from brainio import CATALOG_NAME, BUCKET_NAME
 from brainio.stimuli import StimulusSet
 from brainio.assemblies import NeuroidAssembly
 from brainio.packaging import package_stimulus_set, package_data_assembly_extend, package_data_assembly_commit
 
 NEUROID_ASSEMBLY_IDENTIFIER = 'allen2021.natural-scenes'
-STIMULUS_SET_IDENTIFIER = 'allen2021.natural-scenes'
+STIMULUS_SET_IDENTIFIER = 'allen2021.natural-scenes-stimuli'
 N_SUBJECTS = 8
 N_MAX_SESSIONS = 40
 N_TRIALS_PER_SESSION = 750
@@ -38,7 +38,7 @@ def extract_hdf5_images(root_path: Path):
     """
     if (root_path / 'images').exists():
         raise RuntimeError(f'directory f{root_path}/images already exists; delete it to continue')
-    image_paths = [root_path / 'images' / f'{i_stimulus}.png' for i_stimulus in range(N_STIMULI)]
+    image_paths = {i_stimulus: root_path / 'images' / f'{i_stimulus}.jpg' for i_stimulus in range(N_STIMULI)}
     stimuli = h5py.File(root_path / 'nsddata_stimuli' / 'stimuli' / 'nsd' / 'nsd_stimuli.hdf5', 'r')['imgBrick']
     for i_stimulus in range(N_STIMULI):
         image = Image.fromarray(stimuli[i_stimulus, :, :, :])
@@ -51,17 +51,16 @@ def load_metadata(root_path: Path):
     metadata.rename(columns={'Unnamed: 0': 'image_id'}, inplace=True)
 
 
-def package_stimuli(root_path: Path):
-    image_paths = extract_hdf5_images(root_path)
+def package_stimuli(root_path: Path, catalog_name: str, bucket_name: str):
     metadata = load_metadata(root_path)
     stimulus_set = StimulusSet(metadata)
-    stimulus_set.get_image = lambda image_id: image_paths[int(image_id)]
+    stimulus_set.image_paths = extract_hdf5_images(root_path)
 
     package_stimulus_set(
-        catalog_name=CATALOG_NAME,
+        catalog_name=catalog_name,
         proto_stimulus_set=stimulus_set,
         stimulus_set_identifier=STIMULUS_SET_IDENTIFIER,
-        bucket_name=BUCKET_NAME,
+        bucket_name=bucket_name,
     )
 
 
@@ -164,7 +163,7 @@ def compute_nc(assembly: NeuroidAssembly):
     return ncsnr_squared / (ncsnr_squared + fraction)
 
 
-def package_assembly(root_path: Path):
+def package_assembly(root_path: Path, catalog_name: str, bucket_name: str):
     roi_data = format_roi_data(root_path)
     trial_info = extract_trial_info(root_path)
 
@@ -236,15 +235,25 @@ def package_assembly(root_path: Path):
         )
 
     package_data_assembly_commit(
-        catalog_name=CATALOG_NAME,
+        catalog_name=catalog_name,
         assembly_identifier=NEUROID_ASSEMBLY_IDENTIFIER,
         stimulus_set_identifier=STIMULUS_SET_IDENTIFIER,
         assembly_class='NeuronRecordingAssembly', 
-        bucket_name=BUCKET_NAME,
+        bucket_name=bucket_name,
     )
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Package the NSD dataset as a NeuroidAssembly and StimulusSet'
+                                                 ' and upload to S3')
+    parser.add_argument('--data_dir', type=str, default=None,
+                        help='Data directory containing stimuli and fMRI data')
+    parser.add_argument('--bucket_name', type=str, default='bonnerlab-brainscore',
+                        help='S3 bucket')
+    parser.add_argument('--catalog_name', type=str, default='bonnerlab-brainscore',
+                        help='brainio catalog')
+    args = parser.parse_args()
+
     root_path = Path(os.getenv('SHARED_DATASETS')) / 'natural-scenes'
-    package_stimuli(root_path)
-    package_assembly(root_path)
+    package_stimuli(root_path, catalog_name=args.catalog_name, bucket_name=args.bucket_name)
+    package_assembly(root_path, catalog_name=args.catalog_name, bucket_name=args.bucket_name)
