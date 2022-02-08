@@ -1,17 +1,12 @@
-from typing import List
 import os
 from pathlib import Path
 import pickle
-
-import numpy as np
-import pandas as pd
-from PIL import Image
 
 from brainio import CATALOG_NAME, BUCKET_NAME
 from brainio.stimuli import StimulusSet
 from brainio.packaging import package_stimulus_set
 
-DATASET_IDENTIFIER = 'ade20k'
+STIMULUS_SET_IDENTIFIER = 'ade20k'
 
 
 def load_metadata(root_path: Path):
@@ -33,7 +28,7 @@ def package_stimuli(root_path: Path):
     package_stimulus_set(
         catalog_name=CATALOG_NAME,
         proto_stimulus_set=stimulus_set,
-        stimulus_set_identifier=DATASET_IDENTIFIER,
+        stimulus_set_identifier=STIMULUS_SET_IDENTIFIER,
         bucket_name=BUCKET_NAME,
     )
 

@@ -1,9 +1,6 @@
-from email.mime import image
-from typing import List
 import os
 from pathlib import Path
 import itertools
-import warnings
 
 import numpy as np
 import pandas as pd
@@ -216,7 +213,7 @@ def package_assembly(root_path: Path):
                 'image_id': ('presentation', image_ids),
                 'session_id': ('presentation', session_ids),
                 'trial_id': ('presentation', trial_ids),
-                'subject': ('neuroid', (i_subject - 1) * np.ones(betas.shape[1])),
+                'subject': ('neuroid', i_subject * np.ones(betas.shape[1])),
                 'roi': ('neuroid', roi_labels),
                 'x': ('neuroid', roi_indices[0]),
                 'y': ('neuroid', roi_indices[1]),
