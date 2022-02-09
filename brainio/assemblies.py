@@ -44,13 +44,11 @@ class DataAssembly(DataArray):
             temp = xr.open_dataarray(from_file)
             close = temp._close     # gather_indexes will destroy the close hook, so store for later
             temp = gather_indexes(temp)
-            coords, dims = _infer_coords_and_dims(temp.shape, temp.coords, temp.dims)
+            temp._close = close
             super(DataAssembly, self).__init__()
-            self._variable = temp._variable
-            self._coords = coords
-            self._name = temp._name
-            self._indexes = temp._indexes
-            self._close = close
+            for attr in temp.__slots__:
+                if hasattr(temp, attr) and hasattr(self, attr) and attr != '__weakref__':
+                    setattr(self, attr, getattr(temp, attr))
         elif is_fastpath(*args, **kwargs):
             # DataArray.__init__ follows a very different code path if fastpath=True
             # gather_indexes is not necessary in those cases
