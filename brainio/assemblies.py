@@ -6,7 +6,6 @@ import itertools
 import numpy as np
 import xarray as xr
 from xarray import DataArray, IndexVariable
-from xarray.core.dataarray import _infer_coords_and_dims
 
 from brainio.xarray_utils import extend_netcdf
 
