@@ -6,6 +6,7 @@ import itertools
 import numpy as np
 import xarray as xr
 from xarray import DataArray, IndexVariable
+from xarray.core.dataarray import _infer_coords_and_dims
 
 from brainio.xarray_utils import extend_netcdf
 
@@ -32,8 +33,25 @@ class DataAssembly(DataArray):
 
     __slots__ = ()
 
-    def __init__(self, *args, **kwargs):
-        if is_fastpath(*args, **kwargs):
+    def __init__(self, *args, from_file: str = None, **kwargs):
+        if from_file is not None:
+            # Lazily load from a file by copying over all attributes. This is a hideous solution,
+            # but it is required because initializing using DataArray(data=data: DataArray) copies
+            # over all the data by loading it into memory. This essentially copies the DataArray
+            # that was loaded from disk by reference, but that's totally fine since that DataArray
+            # will never be used anywhere else.
+            assert len(args) == 0 and len(kwargs) == 0
+            temp = xr.open_dataarray(from_file)
+            close = temp._close     # gather_indexes will destroy the close hook, so store for later
+            temp = gather_indexes(temp)
+            coords, dims = _infer_coords_and_dims(temp.shape, temp.coords, temp.dims)
+            super(DataAssembly, self).__init__()
+            self._variable = temp._variable
+            self._coords = coords
+            self._name = temp._name
+            self._indexes = temp._indexes
+            self._close = close
+        elif is_fastpath(*args, **kwargs):
             # DataArray.__init__ follows a very different code path if fastpath=True
             # gather_indexes is not necessary in those cases
             super(DataAssembly, self).__init__(*args, **kwargs)

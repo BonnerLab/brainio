@@ -6,7 +6,6 @@ import zipfile
 
 import boto3
 import pandas as pd
-import xarray as xr
 from botocore import UNSIGNED
 from botocore.config import Config
 from six.moves.urllib.parse import urlparse
@@ -110,14 +109,13 @@ class AssemblyLoader:
         self.assembly_class = cls
 
     def load(self):
-        data_array = xr.open_dataarray(self.local_path)
-        stimulus_set = get_stimulus_set(self.stimulus_set_identifier)
         class_object = getattr(assemblies_base, self.assembly_class)
+        data_array = class_object(from_file=self.local_path)
+        stimulus_set = get_stimulus_set(self.stimulus_set_identifier)
         if self.assembly_class == 'PropertyAssembly':
             result = data_array
         else:
             result = self.merge_stimulus_set_meta(data_array, stimulus_set)
-        result = class_object(data=result)
         result.attrs["stimulus_set_identifier"] = self.stimulus_set_identifier
         result.attrs["stimulus_set"] = stimulus_set
         return result
