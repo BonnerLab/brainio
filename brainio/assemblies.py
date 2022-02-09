@@ -67,14 +67,16 @@ class DataAssembly(DataArray):
     def to_netcdf(self, path: Union[str, os.PathLike], extending_dim: Hashable = None,
                   unlimited_dims: Iterable[Hashable] = None) -> None:
         """
-        overloads xarray.DataArray.to_netcdf()
-        allows for incremental writes to an existing dataarray on disk along the unlimited dimension `extending_dim`
+        Overloads xarray.DataArray.to_netcdf() to support appending to an existing DataArray file on disk along one dimension at a time.
+
+        :param unlimited_dims: Only used when first creating the DataArray. Dimensions along which the DataAssembly will need to be extended in the future; e.g. for NeuroidAssembly, this might be ['presentation', 'neuroid'] to support extending along image batches ('presentation') and along new model layers/new subjects ('neuroid').
+        :param extending_dim: Only used when appending to an existing DataArray. Dimension along which the current DataArray (`self`) will be appended to the existing DataArray on disk (at `path`).
         """
 
         # Handle any dimension with a MultiIndex, which cannot be saved
         da = self.reset_index(list(self.indexes))
 
-        # Combine the ultimited dimensions with the extending dimension
+        # Combine the unlimited dimensions with the extending dimension
         if unlimited_dims is None:
             unlimited_dims = []
         unlimited_dims = set(unlimited_dims)
