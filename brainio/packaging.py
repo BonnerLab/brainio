@@ -243,7 +243,7 @@ def package_data_assembly(catalog_name, proto_data_assembly, assembly_identifier
 # but this is the simplest way to do it and hopefully this code shouldn't change too much.
 
 def package_data_assembly_extend(proto_data_assembly, extending_dim, assembly_identifier,
-                                 assembly_class="NeuronRecordingAssembly"):
+                                 assembly_class="NeuroidAssembly"):
     # verify
     verify_assembly(proto_data_assembly, assembly_class=assembly_class)
     assert hasattr(brainio.assemblies, assembly_class)
@@ -258,7 +258,7 @@ def package_data_assembly_extend(proto_data_assembly, extending_dim, assembly_id
 
 
 def package_data_assembly_commit(catalog_name, assembly_identifier, stimulus_set_identifier,
-                                 assembly_class="NeuronRecordingAssembly", bucket_name="brainio-contrib"):
+                                 assembly_class="NeuroidAssembly", bucket_name="brainio-contrib"):
     _logger.debug(f"Packaging {assembly_identifier}")
 
     # verify
