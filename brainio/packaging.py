@@ -151,8 +151,8 @@ def package_stimulus_set(
     proto_stimulus_set: StimulusSet,
     stimulus_set_identifier: str,
     catalog_name: str,
-    location_type='scp',
-    location: str = None,
+    location_type: str,
+    location: str,
 ):
     """
     Package a set of images along with their metadata for the BrainIO system.
