@@ -2,13 +2,15 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import logging
 import os
+from pathlib import Path
 import zipfile
+from urllib.parse import urlparse
 
 import boto3
+import fabric
 import pandas as pd
 from botocore import UNSIGNED
 from botocore.config import Config
-from six.moves.urllib.parse import urlparse
 from tqdm import tqdm
 
 from brainio import assemblies as assemblies_base
@@ -36,6 +38,20 @@ class Fetcher(object):
         :return: a full local file path
         """
         raise NotImplementedError("The base Fetcher class does not implement .fetch().  Use a subclass of Fetcher.")
+
+
+class ScpFetcher(Fetcher):
+    "A Fetcher that retrieves files from a remote server using SCP"
+
+    def __init__(self, location, local_filename):
+        super(ScpFetcher, self).__init__(location, local_filename)
+        parsed_url = urlparse(self.location)
+        self.host = parsed_url.scheme
+        self.remote_dir = Path(parsed_url.path).parent
+
+    def fetch(self):
+        with fabric.Connection(self.host) as c:
+            c.get(f"{self.remote_dir}/{self.local_filename}", self.local_dir_path)
 
 
 class BotoFetcher(Fetcher):
@@ -147,6 +163,7 @@ class StimulusSetLoader:
 
 _fetcher_types = {
     "S3": BotoFetcher,
+    "SCP": ScpFetcher,
 }
 
 

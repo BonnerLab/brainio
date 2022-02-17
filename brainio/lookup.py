@@ -110,8 +110,16 @@ class AssemblyLookupError(KeyError):
     pass
 
 
-def append(catalog_name, object_identifier, cls, lookup_type,
-           bucket_name, sha1, s3_key, stimulus_set_identifier=None):
+def append(
+    catalog_name: str,
+    object_identifier: str,
+    cls: str,
+    lookup_type: str,
+    location_type: str,
+    location: str,
+    sha1: str,
+    stimulus_set_identifier: str = None
+):
     global _catalogs
     global _concat_catalogs
     catalogs = get_catalogs()
@@ -122,8 +130,8 @@ def append(catalog_name, object_identifier, cls, lookup_type,
         'identifier': object_identifier,
         'lookup_type': lookup_type,
         'class': cls,
-        'location_type': "S3",
-        'location': f"https://{bucket_name}.s3.amazonaws.com/{s3_key}",
+        'location_type': location_type,
+        'location': location,
         'sha1': sha1,
         'stimulus_set_identifier': stimulus_set_identifier,
         'lookup_source': catalog_name,

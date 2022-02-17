@@ -6,16 +6,52 @@ import re
 import mimetypes
 
 import boto3
+import fabric
+from urllib.parse import urlparse
 from tqdm import tqdm
 import numpy as np
+import xarray as xr
 from PIL import Image
 
 import brainio.assemblies
+from brainio.stimuli import StimulusSet
 from brainio import lookup, list_stimulus_sets
 from brainio.lookup import TYPE_ASSEMBLY, TYPE_STIMULUS_SET, sha1_hash
-from brainio.xarray_utils import extend_netcdf
 
 _logger = logging.getLogger(__name__)
+
+
+class Uploader(object):
+    """A Fetcher obtains data with which to populate a DataAssembly.  """
+
+    def __init__(self, filepath: Path):
+        self.filepath = filepath
+
+    def upload_to_s3(self, bucket_name: str):
+        """
+        Fetches the resource identified by location.
+        :return: a full local file path
+        """
+        _logger.debug(f"Uploading {self.filepath} to {bucket_name}/{self.filepath.name}")
+
+        file_size = os.path.getsize(self.filepath)
+        with tqdm(total=file_size, unit='B', unit_scale=True, desc="upload to s3") as progress_bar:
+            def progress_hook(bytes_amount):
+                if bytes_amount > 0:  # at the end, this sometimes passes a negative byte amount which tqdm can't handle
+                    progress_bar.update(bytes_amount)
+
+            client = boto3.client('s3')
+            client.upload_file(str(self.filepath), bucket_name, self.filepath.name, Callback=progress_hook)
+
+    def upload_via_scp(self, remote_url: str):
+        _logger.debug(f"Uploading {self.filepath} to {remote_url}")
+
+        parsed_url = urlparse(remote_url)
+        host = parsed_url.scheme
+        path = parsed_url.path
+
+        with fabric.Connection(host) as c:
+            c.put(self.filepath, f"{path}/{self.filepath.name}")
 
 
 def create_image_zip(proto_stimulus_set, target_zip_path):
@@ -41,19 +77,6 @@ def create_image_zip(proto_stimulus_set, target_zip_path):
             arcnames.append(arcname)
     sha1 = sha1_hash(target_zip_path)
     return sha1, arcnames
-
-
-def upload_to_s3(source_file_path, bucket_name, target_s3_key):
-    _logger.debug(f"Uploading {source_file_path} to {bucket_name}/{target_s3_key}")
-
-    file_size = os.path.getsize(source_file_path)
-    with tqdm(total=file_size, unit='B', unit_scale=True, desc="upload to s3") as progress_bar:
-        def progress_hook(bytes_amount):
-            if bytes_amount > 0:  # at the end, this sometimes passes a negative byte amount which tqdm can't handle
-                progress_bar.update(bytes_amount)
-
-        client = boto3.client('s3')
-        client.upload_file(str(source_file_path), bucket_name, target_s3_key, Callback=progress_hook)
 
 
 def extract_specific(proto_stimulus_set):
@@ -120,7 +143,17 @@ def check_experiment_stimulus_set(stimulus_set):
     check_image_numbers(stimulus_set)
 
 
-def package_stimulus_set(catalog_name, proto_stimulus_set, stimulus_set_identifier, bucket_name="brainio-contrib"):
+def create_s3_url(bucket_name: str):
+    return f"https://{bucket_name}.s3.amazonaws.com"
+
+
+def package_stimulus_set(
+    proto_stimulus_set: StimulusSet,
+    stimulus_set_identifier: str,
+    catalog_name: str,
+    location_type='scp',
+    location: str = None,
+):
     """
     Package a set of images along with their metadata for the BrainIO system.
     :param catalog_name: The name of the lookup catalog to add the stimulus set to.
@@ -129,47 +162,46 @@ def package_stimulus_set(catalog_name, proto_stimulus_set, stimulus_set_identifi
         and columns for all stimulus-set-specific metadata but not the column 'filename'.
     :param stimulus_set_identifier: A unique name identifying the stimulus set
         <lab identifier>.<first author e.g. 'Rajalingham' or 'MajajHong' for shared first-author><YYYY year of publication>.
-    :param bucket_name: 'brainio.dicarlo' for DiCarlo Lab stimulus sets, 'brainio.contrib' for external stimulus sets,
-        'brainio.requested' for to-be-run-on-monkey-machine stimulus sets.
+    :param location_type: "SCP" or "S3"
+    :param location: URL to remote directory (SCP) or bucket name (S3)
     """
-    _logger.debug(f"Packaging {stimulus_set_identifier}")
+
+    _logger.debug(f"Preparing {stimulus_set_identifier}")
 
     assert 'image_id' in proto_stimulus_set.columns, "StimulusSet needs to have an `image_id` column"
 
-    if bucket_name == 'brainio.requested':
-        check_experiment_stimulus_set(proto_stimulus_set)
+    filepaths = {
+        filetype: Path(__file__).parent / f"image_{stimulus_set_identifier.replace('.', '_')}.{filetype}"
+        for filetype in ("csv", "zip")
+    }
+    sha1_hashes = {}
 
-    # naming
-    image_store_identifier = "image_" + stimulus_set_identifier.replace(".", "_")
-    # - csv
-    csv_file_name = image_store_identifier + ".csv"
-    target_csv_path = Path(__file__).parent / csv_file_name
-    # - zip
-    zip_file_name = image_store_identifier + ".zip"
-    target_zip_path = Path(__file__).parent / zip_file_name
     # create csv and zip files
-    image_zip_sha1, zip_filenames = create_image_zip(proto_stimulus_set, str(target_zip_path))
+    sha1_hashes['zip'], zip_filenames = create_image_zip(proto_stimulus_set, str(filepaths['zip']))
     assert 'filename' not in proto_stimulus_set.columns, "StimulusSet already has column 'filename'"
     proto_stimulus_set['filename'] = zip_filenames  # keep record of zip (or later local) filenames
-    csv_sha1 = create_image_csv(proto_stimulus_set, str(target_csv_path))
-    # upload both to S3
-    upload_to_s3(str(target_csv_path), bucket_name, target_s3_key=csv_file_name)
-    upload_to_s3(str(target_zip_path), bucket_name, target_s3_key=zip_file_name)
-    # link to csv and zip from same identifier. The csv however is the only one of the two rows with a class.
-    lookup.append(
-        catalog_name=catalog_name,
-        object_identifier=stimulus_set_identifier, cls='StimulusSet',
-        lookup_type=TYPE_STIMULUS_SET,
-        bucket_name=bucket_name, sha1=csv_sha1, s3_key=csv_file_name,
-        stimulus_set_identifier=None
-    )
-    lookup.append(
-        catalog_name=catalog_name,
-        object_identifier=stimulus_set_identifier, cls=None,
-        lookup_type=TYPE_STIMULUS_SET,
-        bucket_name=bucket_name, sha1=image_zip_sha1, s3_key=zip_file_name,
-        stimulus_set_identifier=None
-    )
+    sha1_hashes['csv'] = create_image_csv(proto_stimulus_set, str(filepaths['csv']))
+
+    # csv and zip file
+    for filepath, sha1, cls in zip(filepaths, sha1_hashes, ('StimulusSet', None)):
+        # upload file
+        uploader = Uploader(filepath)
+        if location_type == 'S3':
+            uploader.upload_to_s3(bucket_name=location)
+            location = create_s3_url(bucket_name=location)
+        elif location_type == 'SCP':
+            uploader.upload_via_scp(f"{location}/{filepath.name}")
+        # append to catalog
+        lookup.append(
+            catalog_name=catalog_name,
+            object_identifier=stimulus_set_identifier,
+            cls=cls,
+            lookup_type=TYPE_STIMULUS_SET,
+            location_type=location_type,
+            location=f"{location}/{filepath.name}",
+            sha1=sha1,
+            stimulus_set_identifier=None
+        )
     _logger.debug(f"stimulus set {stimulus_set_identifier} packaged")
 
 
@@ -182,15 +214,26 @@ def write_netcdf(assembly, target_netcdf_file, extending_dim=None):
 
 
 def verify_assembly(assembly, assembly_class):
-    if assembly_class is not "PropertyAssembly":
+    if assembly_class != "PropertyAssembly":
         assert 'presentation' in assembly.dims
         if assembly_class.startswith('Neur'):  # neural/neuron assemblies need to follow this format
             assert set(assembly.dims) == {'presentation', 'neuroid'} or \
                    set(assembly.dims) == {'presentation', 'neuroid', 'time_bin'}
 
 
-def package_data_assembly(catalog_name, proto_data_assembly, assembly_identifier, stimulus_set_identifier,
-                          assembly_class="NeuronRecordingAssembly", bucket_name="brainio-contrib"):
+def create_assembly_path(assembly_identifier: str):
+    return Path(__file__).parent / f"assy_{assembly_identifier.replace('.', '_')}.nc"
+
+
+def package_data_assembly(
+    catalog_name: str,
+    location_type: str,
+    location: str,
+    assembly_class: str,
+    assembly_identifier: str,
+    stimulus_set_identifier: str,
+    proto_data_assembly: xr.DataArray = None,
+) -> None:
     """
     Package a set of data along with its metadata for the BrainIO system.
     :param catalog_name: The name of the lookup catalog to add the data assembly to.
@@ -204,6 +247,7 @@ def package_data_assembly(catalog_name, proto_data_assembly, assembly_identifier
           The presentation dimension should not have coordinates for image-specific metadata, these will be drawn from the StimulusSet based on image_id.
         * The neuroid dimension must have a neuroid_id coordinate and should have coordinates for as much neural metadata as possible (e.g. region, subregion, animal, row in array, column in array, etc.)
         * The time_bin dimension should have coordinates time_bin_start and time_bin_end.
+        If proto_data_assembly is None, assumes the file already exists.
     :param assembly_identifier: A dot-separated string starting with a lab identifier.
         * For published: <lab identifier>.<first author e.g. 'Rajalingham' or 'MajajHong' for shared first-author><YYYY year of publication>
         * For requests: <lab identifier>.<b for behavioral|n for neuroidal>.<m for monkey|h for human>.<proposer e.g. 'Margalit'>.<pull request number>
@@ -213,73 +257,48 @@ def package_data_assembly(catalog_name, proto_data_assembly, assembly_identifier
     """
     _logger.debug(f"Packaging {assembly_identifier}")
 
+    filepath = create_assembly_path(assembly_identifier)
+
     # verify
-    verify_assembly(proto_data_assembly, assembly_class=assembly_class)
+    if proto_data_assembly is not None:
+        verify_assembly(proto_data_assembly, assembly_class=assembly_class)
+        sha1 = write_netcdf(proto_data_assembly, filepath)
+    else:
+        assert filepath.exists(), f"{filepath} does not exist"
+        sha1 = sha1_hash(filepath)
     assert hasattr(brainio.assemblies, assembly_class)
     assert stimulus_set_identifier in list_stimulus_sets(), \
         f"StimulusSet {stimulus_set_identifier} not found in packaged stimulus sets"
 
-    # identifiers
-    assembly_store_identifier = "assy_" + assembly_identifier.replace(".", "_")
-    netcdf_file_name = assembly_store_identifier + ".nc"
-    target_netcdf_path = Path(__file__).parent / netcdf_file_name
-    s3_key = netcdf_file_name
+    uploader = Uploader(filepath)
+    if location_type == 'S3':
+        uploader.upload_to_s3(bucket_name=location)
+        location = create_s3_url(bucket_name=location)
+    elif location_type == 'SCP':
+        uploader.upload_via_scp(location)
 
-    # execute
-    netcdf_kf_sha1 = write_netcdf(proto_data_assembly, target_netcdf_path)
-    upload_to_s3(target_netcdf_path, bucket_name, s3_key)
     lookup.append(
         catalog_name=catalog_name,
-        object_identifier=assembly_identifier, stimulus_set_identifier=stimulus_set_identifier,
+        object_identifier=assembly_identifier,
+        stimulus_set_identifier=stimulus_set_identifier,
         lookup_type=TYPE_ASSEMBLY,
-        bucket_name=bucket_name, sha1=netcdf_kf_sha1,
-        s3_key=s3_key, cls=assembly_class
+        location_type=location_type,
+        location=f"{location}/{filepath.name}",
+        cls=assembly_class,
+        sha1=sha1,
     )
+
     _logger.debug(f"assembly {assembly_identifier} packaged")
 
 
-# Two functions below to be used when building up an assembly in chunks that is too large to fit in memory.
-# There's some code repetition within the two functions and with the package_data_assembly function above,
-# but this is the simplest way to do it and hopefully this code shouldn't change too much.
-
-def package_data_assembly_extend(proto_data_assembly, extending_dim, assembly_identifier,
-                                 assembly_class="NeuroidAssembly"):
-    # verify
+def package_data_assembly_extend(
+    proto_data_assembly: xr.DataArray,
+    extending_dim: str,
+    assembly_identifier: str,
+    assembly_class: str = "NeuroidAssembly"
+) -> None:
     verify_assembly(proto_data_assembly, assembly_class=assembly_class)
     assert hasattr(brainio.assemblies, assembly_class)
 
-    # identifiers
-    assembly_store_identifier = "assy_" + assembly_identifier.replace(".", "_")
-    netcdf_file_name = assembly_store_identifier + ".nc"
-    target_netcdf_path = Path(__file__).parent / netcdf_file_name
-
-    # execute
-    _ = write_netcdf(proto_data_assembly, target_netcdf_path, extending_dim=extending_dim)
-
-
-def package_data_assembly_commit(catalog_name, assembly_identifier, stimulus_set_identifier,
-                                 assembly_class="NeuroidAssembly", bucket_name="brainio-contrib"):
-    _logger.debug(f"Packaging {assembly_identifier}")
-
-    # verify
-    assert hasattr(brainio.assemblies, assembly_class)
-    assert stimulus_set_identifier in list_stimulus_sets(), \
-        f"StimulusSet {stimulus_set_identifier} not found in packaged stimulus sets"
-
-    # identifiers
-    assembly_store_identifier = "assy_" + assembly_identifier.replace(".", "_")
-    netcdf_file_name = assembly_store_identifier + ".nc"
-    target_netcdf_path = Path(__file__).parent / netcdf_file_name
-    s3_key = netcdf_file_name
-
-    # execute
-    netcdf_kf_sha1 = sha1_hash(target_netcdf_path)
-    upload_to_s3(target_netcdf_path, bucket_name, s3_key)
-    lookup.append(
-        catalog_name=catalog_name,
-        object_identifier=assembly_identifier, stimulus_set_identifier=stimulus_set_identifier,
-        lookup_type=TYPE_ASSEMBLY,
-        bucket_name=bucket_name, sha1=netcdf_kf_sha1,
-        s3_key=s3_key, cls=assembly_class
-    )
-    _logger.debug(f"assembly {assembly_identifier} packaged")
+    filepath = create_assembly_path(assembly_identifier)
+    _ = write_netcdf(proto_data_assembly, filepath, extending_dim=extending_dim)
