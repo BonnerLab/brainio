@@ -170,36 +170,40 @@ def package_stimulus_set(
 
     assert 'image_id' in proto_stimulus_set.columns, "StimulusSet needs to have an `image_id` column"
 
-    filepaths = {
-        filetype: Path(__file__).parent / f"image_{stimulus_set_identifier.replace('.', '_')}.{filetype}"
-        for filetype in ("csv", "zip")
+    files = {
+        filetype: {
+            "filepath": Path("tmp") / f"image_{stimulus_set_identifier.replace('.', '_')}.{filetype}",
+            "sha1": None,
+            "cls": cls,
+        }
+        for filetype, cls in zip(("csv", "zip"), ("StimulusSet", None))
     }
-    sha1_hashes = {}
 
     # create csv and zip files
-    sha1_hashes['zip'], zip_filenames = create_image_zip(proto_stimulus_set, str(filepaths['zip']))
+    files["zip"]["sha1"], zip_filenames = create_image_zip(proto_stimulus_set, str(files["zip"]["filepath"]))
     assert 'filename' not in proto_stimulus_set.columns, "StimulusSet already has column 'filename'"
     proto_stimulus_set['filename'] = zip_filenames  # keep record of zip (or later local) filenames
-    sha1_hashes['csv'] = create_image_csv(proto_stimulus_set, str(filepaths['csv']))
+    files["csv"]["sha1"] = create_image_csv(proto_stimulus_set, str(files["csv"]["filepath"]))
 
     # csv and zip file
-    for filepath, sha1, cls in zip(filepaths, sha1_hashes, ('StimulusSet', None)):
+    for metadata in files.values():
         # upload file
-        uploader = Uploader(filepath)
+        uploader = Uploader(metadata["filepath"])
         if location_type == 'S3':
             uploader.upload_to_s3(bucket_name=location)
             location = create_s3_url(bucket_name=location)
         elif location_type == 'SCP':
-            uploader.upload_via_scp(f"{location}/{filepath.name}")
+            uploader.upload_via_scp(location)
         # append to catalog
+        filename = metadata["filepath"].name
         lookup.append(
             catalog_name=catalog_name,
             object_identifier=stimulus_set_identifier,
-            cls=cls,
+            cls=metadata["cls"],
             lookup_type=TYPE_STIMULUS_SET,
             location_type=location_type,
-            location=f"{location}/{filepath.name}",
-            sha1=sha1,
+            location=f"{location}/{filename}",
+            sha1=metadata["sha1"],
             stimulus_set_identifier=None
         )
     _logger.debug(f"stimulus set {stimulus_set_identifier} packaged")
@@ -222,7 +226,7 @@ def verify_assembly(assembly, assembly_class):
 
 
 def create_assembly_path(assembly_identifier: str):
-    return Path(__file__).parent / f"assy_{assembly_identifier.replace('.', '_')}.nc"
+    return Path("/tmp") / f"assy_{assembly_identifier.replace('.', '_')}.nc"
 
 
 def package_data_assembly(

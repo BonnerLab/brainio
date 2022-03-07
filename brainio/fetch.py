@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import logging
 import os
 from pathlib import Path
+from threading import local
 import zipfile
 from urllib.parse import urlparse
 
@@ -48,11 +49,14 @@ class ScpFetcher(Fetcher):
         super(ScpFetcher, self).__init__(location, local_filename)
         parsed_url = urlparse(self.location)
         self.host = parsed_url.scheme
-        self.remote_dir = Path(parsed_url.path).parent
+        self.remote_path = Path(parsed_url.path)
+        self.filename = self.remote_path.name
 
     def fetch(self):
+        local_path = f"{self.local_dir_path}/{self.filename}"
         with fabric.Connection(self.host) as c:
-            c.get(f"{self.remote_dir}/{self.local_filename}", self.local_dir_path)
+            c.get(f"{self.remote_path}", local_path)
+        return local_path
 
 
 class BotoFetcher(Fetcher):
