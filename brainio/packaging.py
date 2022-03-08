@@ -172,7 +172,7 @@ def package_stimulus_set(
 
     files = {
         filetype: {
-            "filepath": Path("tmp") / f"image_{stimulus_set_identifier.replace('.', '_')}.{filetype}",
+            "filepath": Path("/tmp") / f"image_{stimulus_set_identifier.replace('.', '_')}.{filetype}",
             "sha1": None,
             "cls": cls,
         }
