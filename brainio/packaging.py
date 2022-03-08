@@ -294,7 +294,7 @@ def package_data_assembly(
         uploader.upload_to_s3(bucket_name=location)
         location = create_s3_url(bucket_name=location)
     elif location_type == 'network-storage':
-        uploader.upload_via_rsync(location)
+        uploader.upload_to_network_storage(location)
 
     lookup.append(
         catalog_name=catalog_name,
