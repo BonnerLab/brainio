@@ -212,7 +212,16 @@ def package_stimulus_set(
 def write_netcdf(assembly, target_netcdf_file, extending_dim=None):
     if not os.path.exists(target_netcdf_file):
         _logger.debug(f"Writing assembly to {target_netcdf_file}")
-    assembly.to_netcdf(target_netcdf_file, extending_dim)
+
+    # FIXME this next commented out bit throws an error on the .to_netcdf() when the array contains bool coords
+    # xarray v0.21.0 fixes this (https://xarray.pydata.org/en/stable/whats-new.html)
+    # Under Bug Fixes:
+    # Subclasses of byte and str (e.g. np.str_ and np.bytes_) will now serialise to disk rather than raising a ValueError: unsupported dtype for netCDF4 variable: object as they did previously (PR5264). By Zeb Nicholls.
+
+    # Uncomment the casting to DataAssemblyonce we update xarray
+    # assembly = brainio.assemblies.DataAssembly(assembly)
+    # assembly.to_netcdf(target_netcdf_file, extending_dim=extending_dim)
+    assembly.to_netcdf(target_netcdf_file)
     sha1 = sha1_hash(target_netcdf_file)
     return sha1
 
