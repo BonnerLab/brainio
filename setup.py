@@ -10,6 +10,7 @@ requirements = [
     "six",
     "boto3",
     "fabric",
+    "patchwork",
     "tqdm",
     "Pillow",
     "entrypoints",

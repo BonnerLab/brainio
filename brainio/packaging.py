@@ -7,6 +7,7 @@ import mimetypes
 
 import boto3
 import fabric
+import patchwork
 from urllib.parse import urlparse
 from tqdm import tqdm
 import numpy as np
@@ -43,15 +44,20 @@ class Uploader(object):
             client = boto3.client('s3')
             client.upload_file(str(self.filepath), bucket_name, self.filepath.name, Callback=progress_hook)
 
-    def upload_via_scp(self, remote_url: str):
-        _logger.debug(f"Uploading {self.filepath} to {remote_url}")
+    def upload_to_network_storage(self, remote_url: str, backend='rsync'):
+        _logger.debug(f"Uploading {self.filepath} to {remote_url} using {backend}")
 
         parsed_url = urlparse(remote_url)
         host = parsed_url.scheme
         path = parsed_url.path
 
         with fabric.Connection(host) as c:
-            c.put(self.filepath, f"{path}/{self.filepath.name}")
+            if backend == 'scp':
+                c.put(self.filepath, f"{path}/{self.filepath.name}")
+            elif backend == 'rsync':
+                patchwork.transfers.rsync(c, self.filepath, f"{path}/{self.filepath.name}")
+            else:
+                raise ValueError
 
 
 def create_image_zip(proto_stimulus_set, target_zip_path):
@@ -192,8 +198,8 @@ def package_stimulus_set(
         if location_type == 'S3':
             uploader.upload_to_s3(bucket_name=location)
             location = create_s3_url(bucket_name=location)
-        elif location_type == 'SCP':
-            uploader.upload_via_scp(location)
+        elif location_type == 'network-storage':
+            uploader.upload_to_network_storage(location)
         # append to catalog
         filename = metadata["filepath"].name
         lookup.append(
@@ -287,8 +293,8 @@ def package_data_assembly(
     if location_type == 'S3':
         uploader.upload_to_s3(bucket_name=location)
         location = create_s3_url(bucket_name=location)
-    elif location_type == 'SCP':
-        uploader.upload_via_scp(location)
+    elif location_type == 'network-storage':
+        uploader.upload_via_rsync(location)
 
     lookup.append(
         catalog_name=catalog_name,
