@@ -3,12 +3,11 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import logging
 import os
 from pathlib import Path
-from threading import local
 import zipfile
 from urllib.parse import urlparse
+import subprocess
 
 import boto3
-import fabric
 import pandas as pd
 import xarray as xr
 from botocore import UNSIGNED
@@ -42,20 +41,17 @@ class Fetcher(object):
         raise NotImplementedError("The base Fetcher class does not implement .fetch().  Use a subclass of Fetcher.")
 
 
-class ScpFetcher(Fetcher):
+class NetworkStorageFetcher(Fetcher):
     "A Fetcher that retrieves files from a remote server using SCP"
 
     def __init__(self, location, local_filename):
-        super(ScpFetcher, self).__init__(location, local_filename)
-        parsed_url = urlparse(self.location)
-        self.host = parsed_url.scheme
-        self.remote_path = Path(parsed_url.path)
-        self.filename = self.remote_path.name
+        super(NetworkStorageFetcher, self).__init__(location, local_filename)
+        self.filename = Path(urlparse(self.location).path).remote_path.name
 
     def fetch(self):
+        _logger.debug(f"Downloading {self.filepath} from {self.location} using rsync")
         local_path = f"{self.local_dir_path}/{self.filename}"
-        with fabric.Connection(self.host) as c:
-            c.get(f"{self.remote_path}", local_path)
+        subprocess.run(["rsync", "-vzhW", "--progress", self.location, local_path])
         return local_path
 
 
@@ -169,7 +165,7 @@ class StimulusSetLoader:
 
 _fetcher_types = {
     "S3": BotoFetcher,
-    "SCP": ScpFetcher,
+    "network-storage": NetworkStorageFetcher,
 }
 
 
