@@ -9,8 +9,6 @@ with open('README.md') as readme_file:
 requirements = [
     "six",
     "boto3",
-    "fabric",
-    "patchwork",
     "tqdm",
     "Pillow",
     "entrypoints",

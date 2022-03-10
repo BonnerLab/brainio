@@ -1,3 +1,4 @@
+import subprocess
 import logging
 import os
 import zipfile
@@ -6,9 +7,6 @@ import re
 import mimetypes
 
 import boto3
-import fabric
-import patchwork
-from urllib.parse import urlparse
 from tqdm import tqdm
 import numpy as np
 import xarray as xr
@@ -44,20 +42,9 @@ class Uploader(object):
             client = boto3.client('s3')
             client.upload_file(str(self.filepath), bucket_name, self.filepath.name, Callback=progress_hook)
 
-    def upload_to_network_storage(self, remote_url: str, backend='rsync'):
-        _logger.debug(f"Uploading {self.filepath} to {remote_url} using {backend}")
-
-        parsed_url = urlparse(remote_url)
-        host = parsed_url.scheme
-        path = parsed_url.path
-
-        with fabric.Connection(host) as c:
-            if backend == 'scp':
-                c.put(self.filepath, f"{path}/{self.filepath.name}")
-            elif backend == 'rsync':
-                patchwork.transfers.rsync(c, self.filepath, f"{path}/{self.filepath.name}")
-            else:
-                raise ValueError
+    def upload_to_network_storage(self, remote_url: str):
+        _logger.debug(f"Uploading {self.filepath} to {remote_url} using rsync")
+        subprocess.run(["rsync", "-vzhW", "--progress", f"{self.filepath}", f"{remote_url}/{self.filepath.name}"])
 
 
 def create_image_zip(proto_stimulus_set, target_zip_path):
@@ -168,8 +155,8 @@ def package_stimulus_set(
         and columns for all stimulus-set-specific metadata but not the column 'filename'.
     :param stimulus_set_identifier: A unique name identifying the stimulus set
         <lab identifier>.<first author e.g. 'Rajalingham' or 'MajajHong' for shared first-author><YYYY year of publication>.
-    :param location_type: "SCP" or "S3"
-    :param location: URL to remote directory (SCP) or bucket name (S3)
+    :param location_type: "remote-storage" or "S3"
+    :param location: URL to remote directory (remote-storage) or bucket name (S3)
     """
 
     _logger.debug(f"Preparing {stimulus_set_identifier}")
@@ -228,8 +215,6 @@ def write_netcdf(assembly, target_netcdf_file, extending_dim=None):
     # assembly = brainio.assemblies.DataAssembly(assembly)
     # assembly.to_netcdf(target_netcdf_file, extending_dim=extending_dim)
     assembly.to_netcdf(target_netcdf_file)
-    sha1 = sha1_hash(target_netcdf_file)
-    return sha1
 
 
 def verify_assembly(assembly, assembly_class):
@@ -278,13 +263,14 @@ def package_data_assembly(
 
     filepath = create_assembly_path(assembly_identifier)
 
-    # verify
-    if proto_data_assembly is not None:
+    if proto_data_assembly is None:
+        proto_data_assembly = xr.open_dataarray(filepath)
         verify_assembly(proto_data_assembly, assembly_class=assembly_class)
-        sha1 = write_netcdf(proto_data_assembly, filepath)
     else:
-        assert filepath.exists(), f"{filepath} does not exist"
-        sha1 = sha1_hash(filepath)
+        verify_assembly(proto_data_assembly, assembly_class=assembly_class)
+        write_netcdf(proto_data_assembly, filepath)
+    sha1 = sha1_hash(filepath)
+
     assert hasattr(brainio.assemblies, assembly_class)
     assert stimulus_set_identifier in list_stimulus_sets(), \
         f"StimulusSet {stimulus_set_identifier} not found in packaged stimulus sets"
@@ -308,16 +294,3 @@ def package_data_assembly(
     )
 
     _logger.debug(f"assembly {assembly_identifier} packaged")
-
-
-def package_data_assembly_extend(
-    proto_data_assembly: xr.DataArray,
-    extending_dim: str,
-    assembly_identifier: str,
-    assembly_class: str = "NeuroidAssembly"
-) -> None:
-    verify_assembly(proto_data_assembly, assembly_class=assembly_class)
-    assert hasattr(brainio.assemblies, assembly_class)
-
-    filepath = create_assembly_path(assembly_identifier)
-    _ = write_netcdf(proto_data_assembly, filepath, extending_dim=extending_dim)
