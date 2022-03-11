@@ -174,12 +174,13 @@ def get_fetcher(type="S3", location=None, local_filename=None):
     return _fetcher_types[type](location, local_filename)
 
 
-def fetch_file(location_type, location, sha1):
+def fetch_file(location_type, location, sha1=None):
     filename = filename_from_link(location)
     fetcher = get_fetcher(type=location_type, location=location,
                           local_filename=filename)
     local_path = fetcher.fetch()
-    verify_sha1(local_path, sha1)
+    if sha1 is None:
+        verify_sha1(local_path, sha1)
     return local_path
 
 
@@ -199,10 +200,14 @@ def unzip(zip_path):
     return containing_dir
 
 
-def get_assembly(identifier):
+def get_assembly(identifier, skip_verify: bool = False):
     assembly_lookup = lookup_assembly(identifier)
+    if skip_verify:
+        sha1 = None
+    else:
+        sha1 = assembly_lookup['sha1']
     local_path = fetch_file(location_type=assembly_lookup['location_type'],
-                            location=assembly_lookup['location'], sha1=assembly_lookup['sha1'])
+                            location=assembly_lookup['location'], sha1=sha1)
     loader = AssemblyLoader(local_path, cls=assembly_lookup['class'],
                             stimulus_set_identifier=assembly_lookup['stimulus_set_identifier'])
     assembly = loader.load()
@@ -210,12 +215,16 @@ def get_assembly(identifier):
     return assembly
 
 
-def get_stimulus_set(identifier):
+def get_stimulus_set(identifier, skip_verify: bool = False):
     csv_lookup, zip_lookup = lookup_stimulus_set(identifier)
+    if skip_verify:
+        sha1_zip = None
+    else:
+        sha1_zip = zip_lookup["sha1"]
     csv_path = fetch_file(location_type=csv_lookup['location_type'], location=csv_lookup['location'],
                           sha1=csv_lookup['sha1'])
     zip_path = fetch_file(location_type=zip_lookup['location_type'], location=zip_lookup['location'],
-                          sha1=zip_lookup['sha1'])
+                          sha1=sha1_zip)
     stimuli_directory = unzip(zip_path)
     loader = StimulusSetLoader(csv_path=csv_path, stimuli_directory=stimuli_directory, cls=csv_lookup['class'])
     stimulus_set = loader.load()
