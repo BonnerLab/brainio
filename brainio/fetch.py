@@ -179,7 +179,7 @@ def fetch_file(location_type, location, sha1=None):
     fetcher = get_fetcher(type=location_type, location=location,
                           local_filename=filename)
     local_path = fetcher.fetch()
-    if sha1 is None:
+    if sha1 is not None:
         verify_sha1(local_path, sha1)
     return local_path
 
