@@ -46,11 +46,11 @@ class NetworkStorageFetcher(Fetcher):
 
     def __init__(self, location, local_filename):
         super(NetworkStorageFetcher, self).__init__(location, local_filename)
-        self.filename = Path(urlparse(self.location).path).remote_path.name
+        self.filename = Path(urlparse(self.location).path).name
 
     def fetch(self):
-        _logger.debug(f"Downloading {self.filepath} from {self.location} using rsync")
         local_path = f"{self.local_dir_path}/{self.filename}"
+        _logger.debug(f"Downloading {local_path} from {self.location} using rsync")
         subprocess.run(["rsync", "-vzhW", "--progress", self.location, local_path])
         return local_path
 
