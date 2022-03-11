@@ -42,7 +42,7 @@ class Fetcher(object):
 
 
 class NetworkStorageFetcher(Fetcher):
-    "A Fetcher that retrieves files from a remote server using SCP"
+    """A Fetcher that retrieves files from a remote server using rsync."""
 
     def __init__(self, location, local_filename):
         super(NetworkStorageFetcher, self).__init__(location, local_filename)
@@ -50,8 +50,9 @@ class NetworkStorageFetcher(Fetcher):
 
     def fetch(self):
         local_path = f"{self.local_dir_path}/{self.filename}"
-        _logger.debug(f"Downloading {local_path} from {self.location} using rsync")
-        subprocess.run(["rsync", "-vzhW", "--progress", self.location, local_path])
+        if not Path(local_path).exists():
+            _logger.debug(f"Downloading {local_path} from {self.location} using rsync")
+            subprocess.run(["rsync", "-vzhW", "--progress", self.location, local_path])
         return local_path
 
 
@@ -155,7 +156,7 @@ class StimulusSetLoader:
         self.cls = cls
 
     def load(self):
-        stimulus_set = pd.read_csv(self.csv_path)
+        stimulus_set = pd.read_csv(self.csv_path).astype({"image_id": str})
         stimulus_set = StimulusSet(stimulus_set)
         stimulus_set.image_paths = {row['image_id']: os.path.join(self.stimuli_directory, row['filename'])
                                     for _, row in stimulus_set.iterrows()}
