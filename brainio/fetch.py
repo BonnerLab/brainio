@@ -44,11 +44,11 @@ class Fetcher(object):
 class NetworkStorageFetcher(Fetcher):
     """A Fetcher that retrieves files from a remote server using rsync."""
 
-    def __init__(self, location, local_filename):
+    def __init__(self, location: str, local_filename: str) -> None:
         super(NetworkStorageFetcher, self).__init__(location, local_filename)
         self.filename = Path(urlparse(self.location).path).name
 
-    def fetch(self):
+    def fetch(self) -> str:
         local_path = f"{self.local_dir_path}/{self.filename}"
         if not Path(local_path).exists():
             _logger.debug(f"Downloading {local_path} from {self.location} using rsync")
@@ -121,14 +121,15 @@ class AssemblyLoader:
     Loads an assembly from a file.
     """
 
-    def __init__(self, local_path, stimulus_set_identifier, cls):
+    def __init__(self, local_path, stimulus_set_identifier, cls, skip_verify: bool = False):
         self.local_path = local_path
         self.stimulus_set_identifier = stimulus_set_identifier
         self.assembly_class = cls
+        self.skip_verify = skip_verify
 
     def load(self):
         data_array = xr.open_dataarray(self.local_path)
-        stimulus_set = get_stimulus_set(self.stimulus_set_identifier)
+        stimulus_set = get_stimulus_set(self.stimulus_set_identifier, self.skip_verify)
         class_object = getattr(assemblies_base, self.assembly_class)
         if self.assembly_class == 'PropertyAssembly':
             result = data_array
@@ -139,7 +140,8 @@ class AssemblyLoader:
         result.attrs["stimulus_set"] = stimulus_set
         return result
 
-    def merge_stimulus_set_meta(self, assy, stimulus_set):
+    @staticmethod
+    def merge_stimulus_set_meta(assy, stimulus_set):
         axis_name, index_column = "presentation", "image_id"
         df_of_coords = pd.DataFrame(coords_for_dim(assy, axis_name))
         cols_to_use = stimulus_set.columns.difference(df_of_coords.columns.difference([index_column]))
@@ -158,8 +160,14 @@ class StimulusSetLoader:
     def load(self):
         stimulus_set = pd.read_csv(self.csv_path).astype({"image_id": str})
         stimulus_set = StimulusSet(stimulus_set)
-        stimulus_set.image_paths = {row['image_id']: os.path.join(self.stimuli_directory, row['filename'])
-                                    for _, row in stimulus_set.iterrows()}
+        stimulus_set.image_paths = dict(
+            zip(
+                stimulus_set["image_id"],
+                stimulus_set["filename"].apply(
+                    (lambda x: os.path.join(self.stimuli_directory, x))
+                ),
+            )
+        )
         assert all(os.path.isfile(image_path) for image_path in stimulus_set.image_paths.values())
         return stimulus_set
 
@@ -209,7 +217,8 @@ def get_assembly(identifier, skip_verify: bool = False):
     local_path = fetch_file(location_type=assembly_lookup['location_type'],
                             location=assembly_lookup['location'], sha1=sha1)
     loader = AssemblyLoader(local_path, cls=assembly_lookup['class'],
-                            stimulus_set_identifier=assembly_lookup['stimulus_set_identifier'])
+                            stimulus_set_identifier=assembly_lookup['stimulus_set_identifier'],
+                            skip_verify=skip_verify)
     assembly = loader.load()
     assembly.attrs['identifier'] = identifier
     return assembly
@@ -218,11 +227,13 @@ def get_assembly(identifier, skip_verify: bool = False):
 def get_stimulus_set(identifier, skip_verify: bool = False):
     csv_lookup, zip_lookup = lookup_stimulus_set(identifier)
     if skip_verify:
+        sha1_csv = None
         sha1_zip = None
     else:
+        sha1_csv = csv_lookup["sha1"]
         sha1_zip = zip_lookup["sha1"]
     csv_path = fetch_file(location_type=csv_lookup['location_type'], location=csv_lookup['location'],
-                          sha1=csv_lookup['sha1'])
+                          sha1=sha1_csv)
     zip_path = fetch_file(location_type=zip_lookup['location_type'], location=zip_lookup['location'],
                           sha1=sha1_zip)
     stimuli_directory = unzip(zip_path)
