@@ -2,6 +2,7 @@ from collections import OrderedDict, defaultdict
 from typing import Hashable, Union, Iterable
 
 import os
+import uuid
 import itertools
 import numpy as np
 import xarray as xr
@@ -333,7 +334,8 @@ class GroupbyError(Exception):
 
 def merge_data_arrays(data_arrays):
     # https://stackoverflow.com/a/50125997/2225200
-    merged = xr.merge((data_array.rename('z') for data_array in data_arrays))['z'].rename(None)
+    label = uuid.uuid4()
+    merged = xr.merge((data_array.rename(label) for data_array in data_arrays))[label].rename(None)
     # ensure same class
     return type(data_arrays[0])(merged)
 
