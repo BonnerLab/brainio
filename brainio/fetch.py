@@ -121,15 +121,15 @@ class AssemblyLoader:
     Loads an assembly from a file.
     """
 
-    def __init__(self, local_path, stimulus_set_identifier, cls, skip_verify: bool = False):
+    def __init__(self, local_path, stimulus_set_identifier, cls, check_integrity: bool = True):
         self.local_path = local_path
         self.stimulus_set_identifier = stimulus_set_identifier
         self.assembly_class = cls
-        self.skip_verify = skip_verify
+        self.check_integrity = check_integrity
 
     def load(self):
         data_array = xr.open_dataarray(self.local_path)
-        stimulus_set = get_stimulus_set(self.stimulus_set_identifier, self.skip_verify)
+        stimulus_set = get_stimulus_set(self.stimulus_set_identifier, self.check_integrity)
         class_object = getattr(assemblies_base, self.assembly_class)
         if self.assembly_class == 'PropertyAssembly':
             result = data_array
@@ -208,30 +208,30 @@ def unzip(zip_path):
     return containing_dir
 
 
-def get_assembly(identifier, skip_verify: bool = False):
+def get_assembly(identifier, check_integrity: bool = True):
     assembly_lookup = lookup_assembly(identifier)
-    if skip_verify:
-        sha1 = None
-    else:
+    if check_integrity:
         sha1 = assembly_lookup['sha1']
+    else:
+        sha1 = None
     local_path = fetch_file(location_type=assembly_lookup['location_type'],
                             location=assembly_lookup['location'], sha1=sha1)
     loader = AssemblyLoader(local_path, cls=assembly_lookup['class'],
                             stimulus_set_identifier=assembly_lookup['stimulus_set_identifier'],
-                            skip_verify=skip_verify)
+                            check_integrity=check_integrity)
     assembly = loader.load()
     assembly.attrs['identifier'] = identifier
     return assembly
 
 
-def get_stimulus_set(identifier, skip_verify: bool = False):
+def get_stimulus_set(identifier, check_integrity: bool = False):
     csv_lookup, zip_lookup = lookup_stimulus_set(identifier)
-    if skip_verify:
-        sha1_csv = None
-        sha1_zip = None
-    else:
+    if check_integrity:
         sha1_csv = csv_lookup["sha1"]
         sha1_zip = zip_lookup["sha1"]
+    else:
+        sha1_csv = None
+        sha1_zip = None
     csv_path = fetch_file(location_type=csv_lookup['location_type'], location=csv_lookup['location'],
                           sha1=sha1_csv)
     zip_path = fetch_file(location_type=zip_lookup['location_type'], location=zip_lookup['location'],
