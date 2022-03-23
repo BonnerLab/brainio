@@ -224,7 +224,7 @@ def get_assembly(identifier, check_integrity: bool = True):
     return assembly
 
 
-def get_stimulus_set(identifier, check_integrity: bool = False):
+def get_stimulus_set(identifier, check_integrity: bool = True):
     csv_lookup, zip_lookup = lookup_stimulus_set(identifier)
     if check_integrity:
         sha1_csv = csv_lookup["sha1"]
