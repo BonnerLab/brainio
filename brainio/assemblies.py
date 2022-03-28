@@ -334,8 +334,8 @@ class GroupbyError(Exception):
 
 def merge_data_arrays(data_arrays):
     # https://stackoverflow.com/a/50125997/2225200
-    label = uuid.uuid4()
-    merged = xr.merge((data_array.rename(label) for data_array in data_arrays))[label].rename(None)
+    temp_dim = str(uuid.uuid4())
+    merged = xr.merge((data_array.rename(temp_dim) for data_array in data_arrays))[temp_dim].rename(None)
     # ensure same class
     return type(data_arrays[0])(merged)
 
