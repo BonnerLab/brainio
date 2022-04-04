@@ -27,13 +27,13 @@ _logger = logging.getLogger(__name__)
 class Fetcher(object):
     """A Fetcher obtains data with which to populate a DataAssembly.  """
 
-    def __init__(self, location: str, local_filename: str) -> None:
+    def __init__(self, location, local_filename):
         self.location = location
         self.local_filename = local_filename
         self.local_dir_path = os.path.join(_local_data_path, self.local_filename)
         os.makedirs(self.local_dir_path, exist_ok=True)
 
-    def fetch(self) -> str:
+    def fetch(self):
         """
         Fetches the resource identified by location.
         :return: a full local file path
@@ -59,7 +59,7 @@ class NetworkStorageFetcher(Fetcher):
 class BotoFetcher(Fetcher):
     """A Fetcher that retrieves files from Amazon Web Services' S3 data storage.  """
 
-    def __init__(self, location: str, local_filename: str) -> None:
+    def __init__(self, location, local_filename):
         super(BotoFetcher, self).__init__(location, local_filename)
         parsed_url = urlparse(self.location)
         split_path = parsed_url.path.lstrip('/').split("/")
@@ -74,12 +74,12 @@ class BotoFetcher(Fetcher):
         self.output_filename = os.path.join(self.local_dir_path, self.relative_path)
         self._logger = logging.getLogger(fullname(self))
 
-    def fetch(self) -> str:
+    def fetch(self):
         if not os.path.exists(self.output_filename):
             self.download_boto()
         return self.output_filename
 
-    def download_boto(self) -> None:
+    def download_boto(self):
         """Downloads file from S3 via boto at `url` and writes it in `self.output_filename`."""
         self._logger.info('downloading %s' % self.relative_path)
         try:  # try with authentication
@@ -96,7 +96,7 @@ class BotoFetcher(Fetcher):
                 # raise Exception instead of specific type to avoid missing __init__ arguments
                 raise Exception([e_signed, e_unsigned])
 
-    def download_boto_config(self, config) -> None:
+    def download_boto_config(self, config):
         s3 = boto3.resource('s3', config=config)
         obj = s3.Object(self.bucketname, self.relative_path)
         # show progress. see https://gist.github.com/wy193777/e7607d12fad13459e8992d4f69b53586
@@ -227,9 +227,11 @@ def get_assembly(identifier, check_integrity: bool = True):
 def get_stimulus_set(identifier, check_integrity: bool = True):
     csv_lookup, zip_lookup = lookup_stimulus_set(identifier)
     if check_integrity:
-        sha1_csv, sha1_zip = csv_lookup["sha1"], zip_lookup["sha1"]
+        sha1_csv = csv_lookup["sha1"]
+        sha1_zip = zip_lookup["sha1"]
     else:
-        sha1_csv, sha1_zip = None, None
+        sha1_csv = None
+        sha1_zip = None
     csv_path = fetch_file(location_type=csv_lookup['location_type'], location=csv_lookup['location'],
                           sha1=sha1_csv)
     zip_path = fetch_file(location_type=zip_lookup['location_type'], location=zip_lookup['location'],
@@ -238,11 +240,11 @@ def get_stimulus_set(identifier, check_integrity: bool = True):
     loader = StimulusSetLoader(csv_path=csv_path, stimuli_directory=stimuli_directory, cls=csv_lookup['class'])
     stimulus_set = loader.load()
     stimulus_set.identifier = identifier
-    if check_integrity:
-        # ensure perfect overlap
-        stimuli_paths = [str(path) for path in Path(stimuli_directory).rglob("*") if path.suffix not in (".csv", ".zip") and not path.is_dir()]
-        assert set(stimulus_set.image_paths.values()) == set(stimuli_paths), \
-            "Inconsistency: unzipped stimuli paths do not match csv paths"
+    # ensure perfect overlap
+    # stimuli_paths = [os.path.join(stimuli_directory, local_path) for local_path in os.listdir(stimuli_directory)
+    #                  if not local_path.endswith('.zip') and not local_path.endswith('.csv')]
+    # assert set(stimulus_set.image_paths.values()) == set(stimuli_paths), \
+    #     "Inconsistency: unzipped stimuli paths do not match csv paths"
     return stimulus_set
 
 
