@@ -2,6 +2,7 @@ from collections import OrderedDict, defaultdict
 from typing import Hashable, Union, Iterable
 
 import os
+import uuid
 import itertools
 import numpy as np
 import xarray as xr
@@ -32,22 +33,21 @@ class DataAssembly(DataArray):
 
     __slots__ = ()
 
-    def __init__(self, *args, from_file: str = None, **kwargs):
-        if from_file is not None:
+    def __init__(self, *args, lazy_da: DataArray = None, **kwargs):
+        if lazy_da is not None:
             # Lazily load from a file by copying over all attributes. This is a hideous solution,
             # but it is required because initializing using DataArray(data=data: DataArray) copies
             # over all the data by loading it into memory. This essentially copies the DataArray
             # that was loaded from disk by reference, but that's totally fine since that DataArray
             # will never be used anywhere else.
             assert len(args) == 0 and len(kwargs) == 0
-            temp = xr.open_dataarray(from_file)
-            close = temp._close     # gather_indexes will destroy the close hook, so store for later
-            temp = gather_indexes(temp)
-            temp._close = close
+            close = lazy_da._close     # gather_indexes will destroy the close hook, so store for later
+            lazy_da = gather_indexes(lazy_da)
+            lazy_da._close = close
             super(DataAssembly, self).__init__()
-            for attr in temp.__slots__:
-                if hasattr(temp, attr) and hasattr(self, attr) and attr != '__weakref__':
-                    setattr(self, attr, getattr(temp, attr))
+            for attr in lazy_da.__slots__:
+                if hasattr(lazy_da, attr) and hasattr(self, attr) and attr != '__weakref__':
+                    setattr(self, attr, getattr(lazy_da, attr))
         elif is_fastpath(*args, **kwargs):
             # DataArray.__init__ follows a very different code path if fastpath=True
             # gather_indexes is not necessary in those cases
@@ -334,7 +334,8 @@ class GroupbyError(Exception):
 
 def merge_data_arrays(data_arrays):
     # https://stackoverflow.com/a/50125997/2225200
-    merged = xr.merge((data_array.rename('z') for data_array in data_arrays))['z'].rename(None)
+    temp_dim = str(uuid.uuid4())
+    merged = xr.merge((data_array.rename(temp_dim) for data_array in data_arrays))[temp_dim].rename(None)
     # ensure same class
     return type(data_arrays[0])(merged)
 

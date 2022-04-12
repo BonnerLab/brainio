@@ -5,10 +5,11 @@ import os
 from pathlib import Path
 import zipfile
 from urllib.parse import urlparse
+import subprocess
 
 import boto3
-import fabric
 import pandas as pd
+import xarray as xr
 from botocore import UNSIGNED
 from botocore.config import Config
 from tqdm import tqdm
@@ -40,18 +41,19 @@ class Fetcher(object):
         raise NotImplementedError("The base Fetcher class does not implement .fetch().  Use a subclass of Fetcher.")
 
 
-class ScpFetcher(Fetcher):
-    "A Fetcher that retrieves files from a remote server using SCP"
+class NetworkStorageFetcher(Fetcher):
+    """A Fetcher that retrieves files from a remote server using rsync."""
 
-    def __init__(self, location, local_filename):
-        super(ScpFetcher, self).__init__(location, local_filename)
-        parsed_url = urlparse(self.location)
-        self.host = parsed_url.scheme
-        self.remote_dir = Path(parsed_url.path).parent
+    def __init__(self, location: str, local_filename: str) -> None:
+        super(NetworkStorageFetcher, self).__init__(location, local_filename)
+        self.filename = Path(urlparse(self.location).path).name
 
-    def fetch(self):
-        with fabric.Connection(self.host) as c:
-            c.get(f"{self.remote_dir}/{self.local_filename}", self.local_dir_path)
+    def fetch(self) -> str:
+        local_path = f"{self.local_dir_path}/{self.filename}"
+        if not Path(local_path).exists():
+            _logger.debug(f"Downloading {local_path} from {self.location} using rsync")
+            subprocess.run(["rsync", "-vzhW", "--progress", self.location, local_path])
+        return local_path
 
 
 class BotoFetcher(Fetcher):
@@ -119,24 +121,27 @@ class AssemblyLoader:
     Loads an assembly from a file.
     """
 
-    def __init__(self, local_path, stimulus_set_identifier, cls):
+    def __init__(self, local_path, stimulus_set_identifier, cls, check_integrity: bool = True):
         self.local_path = local_path
         self.stimulus_set_identifier = stimulus_set_identifier
         self.assembly_class = cls
+        self.check_integrity = check_integrity
 
     def load(self):
+        data_array = xr.open_dataarray(self.local_path)
+        stimulus_set = get_stimulus_set(self.stimulus_set_identifier, self.check_integrity)
         class_object = getattr(assemblies_base, self.assembly_class)
-        data_array = class_object(from_file=self.local_path)
-        stimulus_set = get_stimulus_set(self.stimulus_set_identifier)
         if self.assembly_class == 'PropertyAssembly':
             result = data_array
         else:
             result = self.merge_stimulus_set_meta(data_array, stimulus_set)
+        result = class_object(lazy_da=result)
         result.attrs["stimulus_set_identifier"] = self.stimulus_set_identifier
         result.attrs["stimulus_set"] = stimulus_set
         return result
 
-    def merge_stimulus_set_meta(self, assy, stimulus_set):
+    @staticmethod
+    def merge_stimulus_set_meta(assy, stimulus_set):
         axis_name, index_column = "presentation", "image_id"
         df_of_coords = pd.DataFrame(coords_for_dim(assy, axis_name))
         cols_to_use = stimulus_set.columns.difference(df_of_coords.columns.difference([index_column]))
@@ -153,17 +158,23 @@ class StimulusSetLoader:
         self.cls = cls
 
     def load(self):
-        stimulus_set = pd.read_csv(self.csv_path)
+        stimulus_set = pd.read_csv(self.csv_path).astype({"image_id": str})
         stimulus_set = StimulusSet(stimulus_set)
-        stimulus_set.image_paths = {row['image_id']: os.path.join(self.stimuli_directory, row['filename'])
-                                    for _, row in stimulus_set.iterrows()}
+        stimulus_set.image_paths = dict(
+            zip(
+                stimulus_set["image_id"],
+                stimulus_set["filename"].apply(
+                    (lambda x: os.path.join(self.stimuli_directory, x))
+                ),
+            )
+        )
         assert all(os.path.isfile(image_path) for image_path in stimulus_set.image_paths.values())
         return stimulus_set
 
 
 _fetcher_types = {
     "S3": BotoFetcher,
-    "SCP": ScpFetcher,
+    "network-storage": NetworkStorageFetcher,
 }
 
 
@@ -171,12 +182,13 @@ def get_fetcher(type="S3", location=None, local_filename=None):
     return _fetcher_types[type](location, local_filename)
 
 
-def fetch_file(location_type, location, sha1):
+def fetch_file(location_type, location, sha1=None):
     filename = filename_from_link(location)
     fetcher = get_fetcher(type=location_type, location=location,
                           local_filename=filename)
     local_path = fetcher.fetch()
-    verify_sha1(local_path, sha1)
+    if sha1 is not None:
+        verify_sha1(local_path, sha1)
     return local_path
 
 
@@ -196,32 +208,43 @@ def unzip(zip_path):
     return containing_dir
 
 
-def get_assembly(identifier):
+def get_assembly(identifier, check_integrity: bool = True):
     assembly_lookup = lookup_assembly(identifier)
+    if check_integrity:
+        sha1 = assembly_lookup['sha1']
+    else:
+        sha1 = None
     local_path = fetch_file(location_type=assembly_lookup['location_type'],
-                            location=assembly_lookup['location'], sha1=assembly_lookup['sha1'])
+                            location=assembly_lookup['location'], sha1=sha1)
     loader = AssemblyLoader(local_path, cls=assembly_lookup['class'],
-                            stimulus_set_identifier=assembly_lookup['stimulus_set_identifier'])
+                            stimulus_set_identifier=assembly_lookup['stimulus_set_identifier'],
+                            check_integrity=check_integrity)
     assembly = loader.load()
     assembly.attrs['identifier'] = identifier
     return assembly
 
 
-def get_stimulus_set(identifier):
+def get_stimulus_set(identifier, check_integrity: bool = True):
     csv_lookup, zip_lookup = lookup_stimulus_set(identifier)
+    if check_integrity:
+        sha1_csv = csv_lookup["sha1"]
+        sha1_zip = zip_lookup["sha1"]
+    else:
+        sha1_csv = None
+        sha1_zip = None
     csv_path = fetch_file(location_type=csv_lookup['location_type'], location=csv_lookup['location'],
-                          sha1=csv_lookup['sha1'])
+                          sha1=sha1_csv)
     zip_path = fetch_file(location_type=zip_lookup['location_type'], location=zip_lookup['location'],
-                          sha1=zip_lookup['sha1'])
+                          sha1=sha1_zip)
     stimuli_directory = unzip(zip_path)
     loader = StimulusSetLoader(csv_path=csv_path, stimuli_directory=stimuli_directory, cls=csv_lookup['class'])
     stimulus_set = loader.load()
     stimulus_set.identifier = identifier
-    # ensure perfect overlap
-    stimuli_paths = [os.path.join(stimuli_directory, local_path) for local_path in os.listdir(stimuli_directory)
-                     if not local_path.endswith('.zip') and not local_path.endswith('.csv')]
-    assert set(stimulus_set.image_paths.values()) == set(stimuli_paths), \
-        "Inconsistency: unzipped stimuli paths do not match csv paths"
+    if check_integrity:
+        # ensure perfect overlap
+        stimuli_paths = [str(path) for path in Path(stimuli_directory).rglob("*") if path.suffix not in (".csv", ".zip") and not path.is_dir()]
+        assert set(stimulus_set.image_paths.values()) == set(stimuli_paths), \
+            "Inconsistency: unzipped stimuli paths do not match csv paths"
     return stimulus_set
 
 
